@@ -1,0 +1,36 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* Remove list bullets and default padding on lists */
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Remove default text decoration on links */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Images */
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Optional: make buttons inherit font and remove browser default border/background */
+button {
+  font: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
