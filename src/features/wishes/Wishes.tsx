@@ -3,10 +3,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuth } from "firebase/auth";
 import { fetchWishes } from "../../gcp/firestoreFunctions/fetchWishes";
 import { deleteWish } from "../../gcp/firestoreFunctions/deleteWish";
-import { Box, Link, List, ListItem, Typography } from "@mui/material";
+import { Box, Button, Link, List, ListItem, Typography } from "@mui/material";
 import DeleteWish from "./components/DeleteWish";
+import type { Wish } from "../../gcp/firestoreFunctions/AddWishApi";
 
-export function Wishes({ userId, navn }: { userId: string; navn: string }) {
+export function Wishes({
+  userId,
+  navn,
+  handleSelect,
+  selected,
+}: {
+  userId: string;
+  navn: string;
+  handleSelect: (wish: Wish) => void;
+  selected: Wish | null;
+}) {
   const queryClient = useQueryClient();
   const auth = getAuth();
   const currentUser = auth.currentUser;
@@ -74,14 +85,28 @@ export function Wishes({ userId, navn }: { userId: string; navn: string }) {
                     {wish.name} — {wish.price}kr
                   </Typography>
                 </Link>
+                {wish.comment && (
+                  <Typography>Kommentar: {wish.comment}</Typography>
+                )}
               </Box>
 
               {currentUser?.uid === userId && (
-                <DeleteWish
-                  id={wish.id}
-                  deletingId={deletingId}
-                  deleteWish={deleteMutation.mutate}
-                />
+                <>
+                  <Button
+                    onClick={() => {
+                      let param = wish;
+                      if (selected?.id === wish.id) param = null;
+                      handleSelect(param);
+                    }}
+                  >
+                    {selected ? "Avslutt redigering" : "Rediger"}
+                  </Button>
+                  <DeleteWish
+                    id={wish.id}
+                    deletingId={deletingId}
+                    deleteWish={deleteMutation.mutate}
+                  />
+                </>
               )}
             </ListItem>
           ))}

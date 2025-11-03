@@ -1,29 +1,55 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { addWish, type Wish } from "../../gcp/firestoreFunctions/AddWishApi";
+import {
+  addWish,
+  patchWish,
+  type Wish,
+} from "../../gcp/firestoreFunctions/AddWishApi";
 import { useAuth } from "../../hooks/useAuth";
 import { Box, Button, TextField, useMediaQuery, useTheme } from "@mui/material";
 
-export function AddWish() {
+export function AddWish({
+  selectedToUpdate,
+  handleUpdateSelect,
+}: {
+  selectedToUpdate: Wish | null;
+  handleUpdateSelect: (wish: Wish | null) => void;
+}) {
   const [showSuccess, setShowSuccess] = useState(false);
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const [formData, setFormData] = useState<Wish>({
-    name: "",
-    link: "",
-    price: "",
-  });
+  const [formData, setFormData] = useState<Wish>(
+    selectedToUpdate || {
+      name: "",
+      link: "",
+      price: "",
+      comment: "",
+    }
+  );
 
   const { mutate, isPending, error } = useMutation({
     mutationFn: addWish,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wishes", user?.uid] });
-      setFormData({ name: "", link: "", price: "" }); // reset form
+      setFormData({ name: "", link: "", price: "", comment: "" }); // reset form
       setShowSuccess(true); // show message
     },
   });
+  const { mutate: update } = useMutation({
+    mutationFn: patchWish,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wishes", user?.uid] });
+      setFormData({ name: "", link: "", price: "", comment: "" }); // reset form
+      setShowSuccess(true); // show message
+    },
+  });
+  useEffect(() => {
+    setFormData(
+      selectedToUpdate || { name: "", link: "", price: "", comment: "" }
+    );
+  }, [selectedToUpdate]);
   useEffect(() => {
     if (showSuccess) {
       const timer = setTimeout(() => setShowSuccess(false), 2000);
@@ -40,7 +66,10 @@ export function AddWish() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutate(formData);
+    if (selectedToUpdate) {
+      handleUpdateSelect(null);
+      update(formData);
+    } else mutate(formData);
   };
 
   return (
@@ -85,11 +114,22 @@ export function AddWish() {
           value={formData.price}
           onChange={handleChange}
           required
+        />{" "}
+        <TextField
+          name="comment"
+          type="text"
+          placeholder="Kommentar"
+          value={formData.comment}
+          onChange={handleChange}
         />
       </Box>
 
       <Button type="submit" disabled={isPending}>
-        {isPending ? "Lagrer..." : "Legg til ønske"}
+        {isPending
+          ? "Lagrer..."
+          : selectedToUpdate
+          ? "Lagre oppdatering"
+          : "Legg til ønske"}
       </Button>
 
       {showSuccess && <p style={{ color: "green" }}>Ønske lagt til</p>}

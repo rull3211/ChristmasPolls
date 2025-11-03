@@ -12,6 +12,7 @@ import {
   CircularProgress,
 } from "@mui/material";
 import Nav from "./features/nav/Nav";
+import type { Wish } from "./gcp/firestoreFunctions/AddWishApi";
 
 export default function LoggedInApp({ user }: { user: User }) {
   const [selectedUser, selectUser] = useState(user.uid);
@@ -19,7 +20,10 @@ export default function LoggedInApp({ user }: { user: User }) {
     queryKey: ["users"],
     queryFn: fetchUserProfiles,
   });
-
+  const [selectedWish, selectWish] = useState<Wish | null>(null);
+  const handleSelect = (wish: Wish | null) => {
+    selectWish(wish);
+  };
   if (isLoading)
     return (
       <Box
@@ -63,8 +67,15 @@ export default function LoggedInApp({ user }: { user: User }) {
         <Wishes
           userId={selectedUser}
           navn={users.find((el) => el.id === selectedUser)?.name || ""}
+          handleSelect={handleSelect}
+          selected={selectedWish}
         />
-        {user.uid === selectedUser && <AddWish />}
+        {user.uid === selectedUser && (
+          <AddWish
+            handleUpdateSelect={handleSelect}
+            selectedToUpdate={selectedWish}
+          />
+        )}
       </Box>
     </Box>
   );
