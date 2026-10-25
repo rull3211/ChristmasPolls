@@ -13,7 +13,7 @@ import {
   priceFetchedOn,
   priceIsTyped,
 } from "./displayWish";
-import { needsRefresh } from "./wishFreshness";
+import { needsRefresh, pendingRefreshKeys } from "./wishFreshness";
 
 export function Wishes({
   userId,
@@ -59,13 +59,15 @@ export function Wishes({
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["wishes", userId] }),
   });
-  const requestedFor = useRef(new Set<string>());
-  const stale = wishes.some(needsRefresh);
+  const attempted = useRef(new Set<string>());
   useEffect(() => {
-    if (!stale || requestedFor.current.has(userId)) return;
-    requestedFor.current.add(userId);
+    if (refreshing) return;
+    const due = pendingRefreshKeys(wishes, attempted.current);
+    if (due.length === 0) return;
+    due.forEach((key) => attempted.current.add(key));
     refresh();
-  }, [stale, userId, refresh]);
+  }, [wishes, refreshing, refresh]);
+  const fetching = (wish: Wish) => refreshing && needsRefresh(wish);
 
   if (isLoading) return <Typography>Laster</Typography>;
   if (error)
@@ -86,11 +88,6 @@ export function Wishes({
         {navn.split(" ")[0]}{" "}
         {wishes.length ? "sine ønsker." : "har ingen ønsker enda"}
       </Typography>
-      {refreshing && (
-        <Typography variant="caption" color="text.secondary">
-          Oppdaterer priser…
-        </Typography>
-      )}
 
       {!!wishes.length && (
         <List className="space-y-2">
@@ -117,7 +114,12 @@ export function Wishes({
                     Pris hentet {priceFetchedOn(wish)}
                   </Typography>
                 )}
-                {priceIsTyped(wish) && (
+                {fetching(wish) && (
+                  <Typography variant="caption" color="text.secondary">
+                    Henter pris…
+                  </Typography>
+                )}
+                {priceIsTyped(wish) && !fetching(wish) && (
                   <Typography variant="caption" color="text.secondary">
                     Pris ikke hentet automatisk
                   </Typography>

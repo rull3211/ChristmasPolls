@@ -1,25 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   addWish,
   patchWish,
-  type FetchedInfo,
   type Wish,
 } from "../../gcp/firestoreFunctions/AddWishApi";
-import {
-  fetchProductInfo,
-  type ProductInfo,
-} from "../../gcp/firestoreFunctions/fetchProductInfo";
 import { useAuth } from "../../hooks/useAuth";
-import { useDebouncedValue } from "../../hooks/useDebouncedValue";
-import { formatPrice } from "../wishes/displayWish";
 import { BookmarkletHelp } from "../bookmarklet/BookmarkletHelp";
 import { normalizeLink } from "./normalizeLink";
 import type { Prefill } from "./prefill";
 import {
   Box,
   Button,
-  Link,
   TextField,
   Typography,
   useMediaQuery,
@@ -28,57 +20,10 @@ import {
 
 const EMPTY_WISH: Wish = { name: "", link: "", price: "", comment: "" };
 
-// Failures that look like the shop refusing us, as opposed to a bad link.
-const REFUSED_REASONS = new Set([
-  "http_error",
-  "timeout",
-  "network_error",
-  "too_many_redirects",
-]);
-
-function describeLookup(info: ProductInfo | undefined): {
-  text: string;
-  refused: boolean;
-} {
-  const plain = (text: string) => ({ text, refused: false });
-  if (!info) {
-    return plain("Kunne ikke hente fra linken. Fyll inn navn og pris under.");
-  }
-  const price =
-    info.price !== null ? formatPrice(info.price, info.currency) : null;
-  if (info.name && price) return plain(`Fant: ${info.name} — ${price}`);
-  if (info.name) {
-    return plain(
-      `Fant navnet «${info.name}», men ikke prisen. Fyll inn pris under.`
-    );
-  }
-  if (price) {
-    return plain(`Fant prisen ${price}, men ikke navnet. Fyll inn navn under.`);
-  }
-  if (info.reason && REFUSED_REASONS.has(info.reason)) {
-    return {
-      text: "Butikken lar oss ikke hente fra siden automatisk. Fyll inn navn og pris under, eller bruk bokmerket.",
-      refused: true,
-    };
-  }
-  return plain("Fant ikke navn og pris på siden. Fyll dem inn under.");
-}
-
 function wishFromPrefill(prefill: Prefill | null | undefined): Wish | null {
   return prefill
     ? { ...EMPTY_WISH, link: prefill.link, name: prefill.name, price: prefill.price }
     : null;
-}
-
-function toFetched(info: ProductInfo | undefined): FetchedInfo | undefined {
-  if (!info?.source || (info.name === null && info.price === null)) return;
-  return {
-    name: info.name,
-    price: info.price,
-    currency: info.currency,
-    source: info.source,
-    fetchedAt: Date.now(),
-  };
 }
 
 export function AddWish({
@@ -101,19 +46,6 @@ export function AddWish({
     selectedToUpdate || wishFromPrefill(prefill) || EMPTY_WISH
   );
 
-  const link = normalizeLink(formData.link);
-  const debouncedLink = useDebouncedValue(link, 700);
-  const lookup = useQuery({
-    queryKey: ["productInfo", debouncedLink],
-    queryFn: () => fetchProductInfo(debouncedLink as string),
-    enabled: debouncedLink !== null,
-    staleTime: 10 * 60 * 1000,
-    retry: false,
-  });
-  const settling =
-    link !== debouncedLink || (debouncedLink !== null && lookup.isFetching);
-  const info = !settling && link !== null ? lookup.data : undefined;
-
   const { mutate, isPending, error } = useMutation({
     mutationFn: addWish,
     onSuccess: () => {
@@ -124,7 +56,8 @@ export function AddWish({
     },
   });
   const { mutate: update } = useMutation({
-    mutationFn: patchWish,
+    mutationFn: ({ wish, clearFetched }: { wish: Wish; clearFetched: boolean }) =>
+      patchWish(wish, clearFetched),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wishes", user?.uid] });
       setFormData(EMPTY_WISH); // reset form
@@ -152,37 +85,23 @@ export function AddWish({
     }));
   };
 
+  const link = normalizeLink(formData.link);
+  const invalidLink = formData.link.trim() !== "" && link === null;
+  const prefilled = !!prefill && !selectedToUpdate && formData.link === prefill.link;
+
+  // Saving never waits for a lookup: the list fetches name and price in the
+  // background once the wish is there.
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (link === null || settling) return;
+    if (link === null) return;
 
-    // A failed lookup must not wipe what an earlier save found for the same link.
-    const keepsLink =
-      selectedToUpdate !== null &&
-      normalizeLink(selectedToUpdate.link) === link;
-    const fetched =
-      toFetched(info) ?? (keepsLink ? selectedToUpdate.fetched : undefined);
-    // A finished lookup counts as checked even if it found nothing, so the
-    // daily refresh does not repeat it straight away.
-    const fetchCheckedAt = info
-      ? Date.now()
-      : keepsLink
-      ? selectedToUpdate.fetchCheckedAt
-      : undefined;
-    const wish: Wish = { ...formData, link, fetched, fetchCheckedAt };
-
+    const wish: Wish = { ...formData, link };
     if (selectedToUpdate) {
+      const clearFetched = normalizeLink(selectedToUpdate.link) !== link;
       handleUpdateSelect(null);
-      update(wish);
+      update({ wish, clearFetched });
     } else mutate(wish);
   };
-
-  const invalidLink = formData.link.trim() !== "" && link === null;
-  const lookupResult =
-    !invalidLink && !settling && link !== null
-      ? describeLookup(lookup.isError ? undefined : info)
-      : null;
-  const prefilled = !!prefill && !selectedToUpdate && formData.link === prefill.link;
 
   return (
     <Box
@@ -225,7 +144,7 @@ export function AddWish({
           placeholder="Navn (om ikke funnet)"
           value={formData.name}
           onChange={handleChange}
-          required={!info?.name}
+          required
         />
         <TextField
           name="price"
@@ -233,7 +152,7 @@ export function AddWish({
           placeholder="Pris (om ikke funnet)"
           value={formData.price}
           onChange={handleChange}
-          required={info?.price == null}
+          required
         />
       </Box>
 
@@ -244,19 +163,7 @@ export function AddWish({
       >
         {invalidLink
           ? "Ugyldig lenke"
-          : settling
-          ? "Henter navn og pris…"
-          : link === null
-          ? "Vi henter navn og pris fra linken. Det du fyller inn under brukes bare hvis vi ikke finner det."
-          : lookupResult?.text}
-        {lookupResult?.refused && (
-          <>
-            {" "}
-            <Link href={link ?? undefined} target="_blank" rel="noopener noreferrer">
-              Åpne siden
-            </Link>
-          </>
-        )}
+          : "Ønsket legges til med en gang. Vi henter navn og pris fra linken etterpå, og det du fyller inn her brukes bare hvis vi ikke finner det."}
       </Typography>
 
       {prefilled && (
@@ -267,11 +174,9 @@ export function AddWish({
 
       <BookmarkletHelp />
 
-      <Button type="submit" disabled={isPending || settling}>
+      <Button type="submit" disabled={isPending}>
         {isPending
           ? "Lagrer..."
-          : settling
-          ? "Henter..."
           : selectedToUpdate
           ? "Lagre oppdatering"
           : "Legg til ønske"}

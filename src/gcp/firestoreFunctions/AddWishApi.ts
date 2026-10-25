@@ -28,6 +28,7 @@ export type Wish = {
 
 export type StoredWish = Wish & { id: string };
 
+// Only what the user typed. Fetched data is written by the server alone.
 function typedFields(wish: Wish) {
   return {
     name: wish.name,
@@ -43,18 +44,14 @@ export async function addWish(wish: Wish) {
   if (!user) throw new Error("User not authenticated");
 
   const wishesRef = collection(db, `users/${user.uid}/wishes`);
-  const docRef = await addDoc(wishesRef, {
-    ...typedFields(wish),
-    ...(wish.fetched && { fetched: wish.fetched }),
-    ...(wish.fetchCheckedAt !== undefined && {
-      fetchCheckedAt: wish.fetchCheckedAt,
-    }),
-  });
+  const docRef = await addDoc(wishesRef, typedFields(wish));
 
   return { id: docRef.id, ...wish };
 }
 
-export async function patchWish(wish: Wish) {
+// A new link makes the old fetched data wrong, so it is cleared and the
+// server fetches again.
+export async function patchWish(wish: Wish, clearFetched: boolean) {
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("User not authenticated");
@@ -63,8 +60,10 @@ export async function patchWish(wish: Wish) {
   const wishRef = doc(db, `users/${user.uid}/wishes/${wish.id}`);
   await updateDoc(wishRef, {
     ...typedFields(wish),
-    fetched: wish.fetched ?? deleteField(),
-    fetchCheckedAt: wish.fetchCheckedAt ?? deleteField(),
+    ...(clearFetched && {
+      fetched: deleteField(),
+      fetchCheckedAt: deleteField(),
+    }),
   });
 
   return { ...wish };
