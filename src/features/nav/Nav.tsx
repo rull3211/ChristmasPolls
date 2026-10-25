@@ -18,9 +18,15 @@ interface Props {
   users: User[];
   selectUser: (id: string) => void;
   selected: string;
+  onOpenSecretSanta?: () => void;
 }
 
-export default function Nav({ users, selectUser, selected }: Props) {
+export default function Nav({
+  users,
+  selectUser,
+  selected,
+  onOpenSecretSanta,
+}: Props) {
   const { user } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -70,6 +76,17 @@ export default function Nav({ users, selectUser, selected }: Props) {
         if (user) handleSelect(user.uid);
       },
     }, // your handler here
+    ...(onOpenSecretSanta
+      ? [
+          {
+            label: "Secret Santa",
+            onClick: () => {
+              onOpenSecretSanta();
+              if (isMobile) setDrawerOpen(false);
+            },
+          },
+        ]
+      : []),
   ].map((item) => (
     <Button
       key={item.label}
