@@ -1,10 +1,10 @@
 import { getAuth } from "firebase/auth";
 import {
   collection,
-  addDoc,
   updateDoc,
   deleteField,
   doc,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../auth/firebase";
 
@@ -24,10 +24,13 @@ export type Wish = {
   id?: string;
   fetched?: FetchedInfo;
   fetchCheckedAt?: number;
+  // Position in the owner's priority list, 0 is wanted most.
+  order?: number;
 };
 
 export type StoredWish = Wish & { id: string };
 
+// Only what the user typed. Fetched data is written by the server alone.
 function typedFields(wish: Wish) {
   return {
     name: wish.name,
@@ -37,24 +40,31 @@ function typedFields(wish: Wish) {
   };
 }
 
-export async function addWish(wish: Wish) {
+// One batch, so ranking the existing wishes and adding the new one last can
+// never be seen half done.
+export async function addWish(wish: Wish, rankExisting: readonly string[] = []) {
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("User not authenticated");
 
   const wishesRef = collection(db, `users/${user.uid}/wishes`);
-  const docRef = await addDoc(wishesRef, {
+  const newRef = doc(wishesRef);
+  const batch = writeBatch(db);
+  rankExisting.forEach((id, index) =>
+    batch.update(doc(wishesRef, id), { order: index })
+  );
+  batch.set(newRef, {
     ...typedFields(wish),
-    ...(wish.fetched && { fetched: wish.fetched }),
-    ...(wish.fetchCheckedAt !== undefined && {
-      fetchCheckedAt: wish.fetchCheckedAt,
-    }),
+    ...(wish.order !== undefined && { order: wish.order }),
   });
+  await batch.commit();
 
-  return { id: docRef.id, ...wish };
+  return { id: newRef.id, ...wish };
 }
 
-export async function patchWish(wish: Wish) {
+// A new link makes the old fetched data wrong, so it is cleared and the
+// server fetches again.
+export async function patchWish(wish: Wish, clearFetched: boolean) {
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("User not authenticated");
@@ -63,8 +73,10 @@ export async function patchWish(wish: Wish) {
   const wishRef = doc(db, `users/${user.uid}/wishes/${wish.id}`);
   await updateDoc(wishRef, {
     ...typedFields(wish),
-    fetched: wish.fetched ?? deleteField(),
-    fetchCheckedAt: wish.fetchCheckedAt ?? deleteField(),
+    ...(clearFetched && {
+      fetched: deleteField(),
+      fetchCheckedAt: deleteField(),
+    }),
   });
 
   return { ...wish };
