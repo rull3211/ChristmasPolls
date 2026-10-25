@@ -1,19 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuth } from "firebase/auth";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { fetchWishes } from "../../gcp/firestoreFunctions/fetchWishes";
 import { deleteWish } from "../../gcp/firestoreFunctions/deleteWish";
 import { refreshWishes } from "../../gcp/firestoreFunctions/refreshWishes";
-import { Box, Button, Link, List, ListItem, Typography } from "@mui/material";
-import DeleteWish from "./components/DeleteWish";
-import type { Wish } from "../../gcp/firestoreFunctions/AddWishApi";
-import {
-  displayName,
-  displayPrice,
-  priceFetchedOn,
-  priceIsTyped,
-} from "./displayWish";
+import { saveWishOrder } from "../../gcp/firestoreFunctions/saveWishOrder";
+import { Box, List, Typography } from "@mui/material";
+import { SortableWishRow, WishRow, type WishRowProps } from "./components/WishRow";
+import type { StoredWish, Wish } from "../../gcp/firestoreFunctions/AddWishApi";
 import { needsRefresh, pendingRefreshKeys } from "./wishFreshness";
+import { applyOrder, isRanked, moveId } from "./wishOrder";
+
+// Every list is a priority list. Until the owner has dragged anything, the
+// order is only alphabetical, and the hint says so.
+function priorityHint(isOwner: boolean, ranked: boolean, firstName: string): string {
+  if (isOwner) {
+    return ranked
+      ? "Din prioriterte liste: det du ønsker deg mest står øverst. Dra i håndtaket for å endre rekkefølgen."
+      : "Dette er en prioritert liste: det du ønsker deg mest skal stå øverst. Dra i håndtaket for å sette rekkefølgen.";
+  }
+  return ranked
+    ? "Prioritert liste: det som ønskes mest står øverst."
+    : `Prioritert liste, men ${firstName} har ikke satt rekkefølgen ennå.`;
+}
 
 export function Wishes({
   userId,
@@ -29,6 +52,7 @@ export function Wishes({
   const queryClient = useQueryClient();
   const auth = getAuth();
   const currentUser = auth.currentUser;
+  const isOwner = currentUser?.uid === userId;
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const {
     data: wishes = [],
@@ -52,7 +76,6 @@ export function Wishes({
       queryClient.invalidateQueries({ queryKey: ["wishes", userId] });
     },
   });
-  deleteMutation.mutate;
 
   const { mutate: refresh, isPending: refreshing } = useMutation({
     mutationFn: () => refreshWishes(userId),
@@ -67,13 +90,69 @@ export function Wishes({
     due.forEach((key) => attempted.current.add(key));
     refresh();
   }, [wishes, refreshing, refresh]);
-  const fetching = (wish: Wish) => refreshing && needsRefresh(wish);
+
+  // The list moves at once and is rolled back if saving fails.
+  const reorder = useMutation({
+    mutationFn: (orderedIds: string[]) => saveWishOrder(userId, orderedIds),
+    onMutate: async (orderedIds) => {
+      await queryClient.cancelQueries({ queryKey: ["wishes", userId] });
+      const previous = queryClient.getQueryData<StoredWish[]>(["wishes", userId]);
+      queryClient.setQueryData<StoredWish[]>(["wishes", userId], (current = []) =>
+        applyOrder(current, orderedIds)
+      );
+      return { previous };
+    },
+    onError: (_error, _orderedIds, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["wishes", userId], context.previous);
+      }
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["wishes", userId] }),
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    reorder.mutate(
+      moveId(
+        wishes.map((wish) => wish.id),
+        String(active.id),
+        String(over.id)
+      )
+    );
+  };
 
   if (isLoading) return <Typography>Laster</Typography>;
   if (error)
     return (
       <Typography>En feil har skjedd: {(error as Error).message}</Typography>
     );
+
+  const ranked = isRanked(wishes);
+  const hint = wishes.length
+    ? priorityHint(isOwner, ranked, navn.split(" ")[0])
+    : null;
+  const rows = wishes.map((wish, index) => {
+    const props: WishRowProps = {
+      wish,
+      rank: index + 1,
+      fetching: refreshing && needsRefresh(wish),
+      isOwner,
+      selected,
+      onSelect: handleSelect,
+      deletingId,
+      onDelete: deleteMutation.mutate,
+    };
+    return isOwner ? (
+      <SortableWishRow key={wish.id} {...props} />
+    ) : (
+      <WishRow key={wish.id} {...props} />
+    );
+  });
 
   return (
     <Box
@@ -88,65 +167,39 @@ export function Wishes({
         {navn.split(" ")[0]}{" "}
         {wishes.length ? "sine ønsker." : "har ingen ønsker enda"}
       </Typography>
+      {hint && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ textAlign: "center", maxWidth: "32rem" }}
+        >
+          {hint}
+        </Typography>
+      )}
+      {reorder.isError && (
+        <Typography variant="caption" color="error">
+          Kunne ikke lagre rekkefølgen. Prøv igjen.
+        </Typography>
+      )}
 
       {!!wishes.length && (
         <List className="space-y-2">
-          {wishes.map((wish) => (
-            <ListItem
-              sx={{ gap: "1rem" }}
-              key={wish.id}
-              className="border rounded-lg p-3 flex justify-between items-center"
+          {isOwner ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              <Box>
-                <Link
-                  href={wish.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  underline="hover"
-                >
-                  <Typography>
-                    {displayName(wish)}
-                    {displayPrice(wish) && ` — ${displayPrice(wish)}`}
-                  </Typography>
-                </Link>
-                {priceFetchedOn(wish) && (
-                  <Typography variant="caption" color="text.secondary">
-                    Pris hentet {priceFetchedOn(wish)}
-                  </Typography>
-                )}
-                {fetching(wish) && (
-                  <Typography variant="caption" color="text.secondary">
-                    Henter pris…
-                  </Typography>
-                )}
-                {priceIsTyped(wish) && !fetching(wish) && (
-                  <Typography variant="caption" color="text.secondary">
-                    Pris ikke hentet automatisk
-                  </Typography>
-                )}
-                {wish.comment && (
-                  <Typography>Kommentar: {wish.comment}</Typography>
-                )}
-              </Box>
-
-              {currentUser?.uid === userId && (
-                <>
-                  <Button
-                    onClick={() =>
-                      handleSelect(selected?.id === wish.id ? null : wish)
-                    }
-                  >
-                    {selected ? "Avslutt redigering" : "Rediger"}
-                  </Button>
-                  <DeleteWish
-                    id={wish.id}
-                    deletingId={deletingId}
-                    deleteWish={deleteMutation.mutate}
-                  />
-                </>
-              )}
-            </ListItem>
-          ))}
+              <SortableContext
+                items={wishes.map((wish) => wish.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {rows}
+              </SortableContext>
+            </DndContext>
+          ) : (
+            rows
+          )}
         </List>
       )}
     </Box>

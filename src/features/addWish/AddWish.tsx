@@ -3,9 +3,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   addWish,
   patchWish,
+  type StoredWish,
   type Wish,
 } from "../../gcp/firestoreFunctions/AddWishApi";
 import { useAuth } from "../../hooks/useAuth";
+import { placeAtEnd } from "../wishes/wishOrder";
 import { BookmarkletHelp } from "../bookmarklet/BookmarkletHelp";
 import { normalizeLink } from "./normalizeLink";
 import type { Prefill } from "./prefill";
@@ -47,7 +49,8 @@ export function AddWish({
   );
 
   const { mutate, isPending, error } = useMutation({
-    mutationFn: addWish,
+    mutationFn: ({ wish, rankExisting }: { wish: Wish; rankExisting: string[] }) =>
+      addWish(wish, rankExisting),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wishes", user?.uid] });
       setFormData(EMPTY_WISH); // reset form
@@ -100,7 +103,12 @@ export function AddWish({
       const clearFetched = normalizeLink(selectedToUpdate.link) !== link;
       handleUpdateSelect(null);
       update({ wish, clearFetched });
-    } else mutate(wish);
+    } else {
+      const current =
+        queryClient.getQueryData<StoredWish[]>(["wishes", user?.uid]) ?? [];
+      const { order, rankExisting } = placeAtEnd(current);
+      mutate({ wish: { ...wish, order }, rankExisting });
+    }
   };
 
   return (

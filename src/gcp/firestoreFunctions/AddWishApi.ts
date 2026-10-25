@@ -1,10 +1,10 @@
 import { getAuth } from "firebase/auth";
 import {
   collection,
-  addDoc,
   updateDoc,
   deleteField,
   doc,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../auth/firebase";
 
@@ -24,6 +24,8 @@ export type Wish = {
   id?: string;
   fetched?: FetchedInfo;
   fetchCheckedAt?: number;
+  // Position in the owner's priority list, 0 is wanted most.
+  order?: number;
 };
 
 export type StoredWish = Wish & { id: string };
@@ -38,15 +40,26 @@ function typedFields(wish: Wish) {
   };
 }
 
-export async function addWish(wish: Wish) {
+// One batch, so ranking the existing wishes and adding the new one last can
+// never be seen half done.
+export async function addWish(wish: Wish, rankExisting: readonly string[] = []) {
   const auth = getAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("User not authenticated");
 
   const wishesRef = collection(db, `users/${user.uid}/wishes`);
-  const docRef = await addDoc(wishesRef, typedFields(wish));
+  const newRef = doc(wishesRef);
+  const batch = writeBatch(db);
+  rankExisting.forEach((id, index) =>
+    batch.update(doc(wishesRef, id), { order: index })
+  );
+  batch.set(newRef, {
+    ...typedFields(wish),
+    ...(wish.order !== undefined && { order: wish.order }),
+  });
+  await batch.commit();
 
-  return { id: docRef.id, ...wish };
+  return { id: newRef.id, ...wish };
 }
 
 // A new link makes the old fetched data wrong, so it is cleared and the
