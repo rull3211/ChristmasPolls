@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAuth } from "firebase/auth";
 import { fetchWishes } from "../../gcp/firestoreFunctions/fetchWishes";
 import { deleteWish } from "../../gcp/firestoreFunctions/deleteWish";
+import { refreshWishes } from "../../gcp/firestoreFunctions/refreshWishes";
 import { Box, Button, Link, List, ListItem, Typography } from "@mui/material";
 import DeleteWish from "./components/DeleteWish";
 import type { Wish } from "../../gcp/firestoreFunctions/AddWishApi";
+import {
+  displayName,
+  displayPrice,
+  priceFetchedOn,
+  priceIsTyped,
+} from "./displayWish";
+import { needsRefresh } from "./wishFreshness";
 
 export function Wishes({
   userId,
@@ -15,7 +23,7 @@ export function Wishes({
 }: {
   userId: string;
   navn: string;
-  handleSelect: (wish: Wish) => void;
+  handleSelect: (wish: Wish | null) => void;
   selected: Wish | null;
 }) {
   const queryClient = useQueryClient();
@@ -46,6 +54,19 @@ export function Wishes({
   });
   deleteMutation.mutate;
 
+  const { mutate: refresh, isPending: refreshing } = useMutation({
+    mutationFn: () => refreshWishes(userId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["wishes", userId] }),
+  });
+  const requestedFor = useRef(new Set<string>());
+  const stale = wishes.some(needsRefresh);
+  useEffect(() => {
+    if (!stale || requestedFor.current.has(userId)) return;
+    requestedFor.current.add(userId);
+    refresh();
+  }, [stale, userId, refresh]);
+
   if (isLoading) return <Typography>Laster</Typography>;
   if (error)
     return (
@@ -65,10 +86,15 @@ export function Wishes({
         {navn.split(" ")[0]}{" "}
         {wishes.length ? "sine ønsker." : "har ingen ønsker enda"}
       </Typography>
+      {refreshing && (
+        <Typography variant="caption" color="text.secondary">
+          Oppdaterer priser…
+        </Typography>
+      )}
 
       {!!wishes.length && (
         <List className="space-y-2">
-          {wishes.map((wish: any) => (
+          {wishes.map((wish) => (
             <ListItem
               sx={{ gap: "1rem" }}
               key={wish.id}
@@ -82,9 +108,20 @@ export function Wishes({
                   underline="hover"
                 >
                   <Typography>
-                    {wish.name} — {wish.price}kr
+                    {displayName(wish)}
+                    {displayPrice(wish) && ` — ${displayPrice(wish)}`}
                   </Typography>
                 </Link>
+                {priceFetchedOn(wish) && (
+                  <Typography variant="caption" color="text.secondary">
+                    Pris hentet {priceFetchedOn(wish)}
+                  </Typography>
+                )}
+                {priceIsTyped(wish) && (
+                  <Typography variant="caption" color="text.secondary">
+                    Pris ikke hentet automatisk
+                  </Typography>
+                )}
                 {wish.comment && (
                   <Typography>Kommentar: {wish.comment}</Typography>
                 )}
@@ -93,11 +130,9 @@ export function Wishes({
               {currentUser?.uid === userId && (
                 <>
                   <Button
-                    onClick={() => {
-                      let param = wish;
-                      if (selected?.id === wish.id) param = null;
-                      handleSelect(param);
-                    }}
+                    onClick={() =>
+                      handleSelect(selected?.id === wish.id ? null : wish)
+                    }
                   >
                     {selected ? "Avslutt redigering" : "Rediger"}
                   </Button>

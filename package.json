@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulator": "VITE_USE_EMULATORS=true vite --port 5174 --strictPort",
+    "emulators": "npx firebase-tools emulators:start --only auth,firestore,functions --project demo-christmas",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "node --test \"src/**/*.test.mjs\" \"src/**/*.test.ts\"",
     "preview": "vite preview"
   },
   "dependencies": {
