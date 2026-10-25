@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Top-level whitelist: only allow specific emails
+    function isWhitelisted() {
+      return request.auth != null && request.auth.token.email in [
+        "benze00@gmail.com",
+        "nababika@gmail.com",
+        "zsacibe@gmail.com",
+        "andrea.hjelde@gmail.com",
+        "renatosomogyi@gmail.com",
+        "jeanettemartin.bhg@gmail.com",
+        "cinthiamartin89@gmail.com",
+        "benkogabor@gmail.com"
+      ];
+    }
+
+    function isAdmin() {
+      return isWhitelisted() &&
+        get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // User Profiles
+    // role and spouseId decide who may draw and who can be drawn, so clients
+    // can never write them; they are set from the console or the CLI.
+    match /userProfiles/{userId} {
+      allow read: if isWhitelisted();
+      allow create: if isWhitelisted() && request.auth.uid == userId
+        && request.resource.data.role == "user"
+        && !("spouseId" in request.resource.data);
+      allow update: if isWhitelisted() && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "spouseId"]);
+    }
+
+    // Users collection
+    match /users/{userId} {
+
+      // Wishes subcollection
+      match /wishes/{wishId} {
+        allow read, write: if isWhitelisted() && request.auth.uid == userId;
+      }
+      match /wishes/{wishId} {
+        allow read: if isWhitelisted();
+      }
+
+    }
+
+    // Secret Santa: points at the draw everyone currently sees.
+    match /secretSanta/current {
+      allow read: if isWhitelisted();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(["activeDrawId", "announcedAt", "activatedAt", "activatedBy"])
+        && request.resource.data.activatedAt == request.time
+        && request.resource.data.activatedBy == request.auth.uid
+        && request.resource.data.announcedAt ==
+          getAfter(/databases/$(database)/documents/secretSantaDraws/$(request.resource.data.activeDrawId)).data.createdAt;
+    }
+
+    // Draws are never updated or deleted: superseded draws are the backups
+    // that a rollback reactivates.
+    match /secretSantaDraws/{drawId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(["createdAt", "createdBy", "participantIds"])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Each assignment is readable only by its giver.
+      match /assignments/{giverId} {
+        allow read: if isWhitelisted() && request.auth.uid == giverId;
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(["receiverId"])
+          && request.resource.data.receiverId is string
+          && request.resource.data.receiverId != giverId;
+      }
+    }
+  }
+}

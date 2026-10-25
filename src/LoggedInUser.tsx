@@ -13,9 +13,12 @@ import {
 } from "@mui/material";
 import Nav from "./features/nav/Nav";
 import type { Wish } from "./gcp/firestoreFunctions/AddWishApi";
+import MyAssignment from "./features/secretSanta/MyAssignment";
+import SecretSantaAdmin from "./features/secretSanta/SecretSantaAdmin";
 
 export default function LoggedInApp({ user }: { user: User }) {
   const [selectedUser, selectUser] = useState(user.uid);
+  const [showSecretSanta, setShowSecretSanta] = useState(false);
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["users"],
     queryFn: fetchUserProfiles,
@@ -24,6 +27,11 @@ export default function LoggedInApp({ user }: { user: User }) {
   const handleSelect = (wish: Wish | null) => {
     selectWish(wish);
   };
+  const handleSelectUser = (id: string) => {
+    setShowSecretSanta(false);
+    selectUser(id);
+  };
+  const isAdmin = users.find((u) => u.id === user.uid)?.role === "admin";
   if (isLoading)
     return (
       <Box
@@ -58,23 +66,37 @@ export default function LoggedInApp({ user }: { user: User }) {
             🎄 Juleønsker
           </Typography>
 
-          <Nav users={users} selectUser={selectUser} selected={selectedUser} />
+          <Nav
+            users={users}
+            selectUser={handleSelectUser}
+            selected={selectedUser}
+            onOpenSecretSanta={
+              isAdmin ? () => setShowSecretSanta(true) : undefined
+            }
+          />
         </Toolbar>
       </AppBar>
 
       {/* Main content */}
       <Box sx={{ flexGrow: 1, p: 2 }}>
-        <Wishes
-          userId={selectedUser}
-          navn={users.find((el) => el.id === selectedUser)?.name || ""}
-          handleSelect={handleSelect}
-          selected={selectedWish}
-        />
-        {user.uid === selectedUser && (
-          <AddWish
-            handleUpdateSelect={handleSelect}
-            selectedToUpdate={selectedWish}
-          />
+        <MyAssignment userId={user.uid} users={users} />
+        {showSecretSanta && isAdmin ? (
+          <SecretSantaAdmin adminId={user.uid} users={users} />
+        ) : (
+          <>
+            <Wishes
+              userId={selectedUser}
+              navn={users.find((el) => el.id === selectedUser)?.name || ""}
+              handleSelect={handleSelect}
+              selected={selectedWish}
+            />
+            {user.uid === selectedUser && (
+              <AddWish
+                handleUpdateSelect={handleSelect}
+                selectedToUpdate={selectedWish}
+              />
+            )}
+          </>
         )}
       </Box>
     </Box>
