@@ -1,7 +1,8 @@
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../auth/firebase";
+import type { StoredWish } from "./AddWishApi";
 
-export async function fetchWishes(userId: string) {
+export async function fetchWishes(userId: string): Promise<StoredWish[]> {
   if (!userId) throw new Error("Missing userId");
 
   const wishesRef = collection(db, `users/${userId}/wishes`);
@@ -10,7 +11,7 @@ export async function fetchWishes(userId: string) {
   const wishes = snapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
-  }));
+  })) as StoredWish[];
 
   return wishes;
 }

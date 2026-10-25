@@ -15,10 +15,12 @@ import Nav from "./features/nav/Nav";
 import type { Wish } from "./gcp/firestoreFunctions/AddWishApi";
 import MyAssignment from "./features/secretSanta/MyAssignment";
 import SecretSantaAdmin from "./features/secretSanta/SecretSantaAdmin";
+import { initialPrefill } from "./features/addWish/initialPrefill";
 
 export default function LoggedInApp({ user }: { user: User }) {
   const [selectedUser, selectUser] = useState(user.uid);
   const [showSecretSanta, setShowSecretSanta] = useState(false);
+  const [prefillUsed, setPrefillUsed] = useState(false);
   const { data: users = [], isLoading } = useQuery({
     queryKey: ["users"],
     queryFn: fetchUserProfiles,
@@ -94,6 +96,8 @@ export default function LoggedInApp({ user }: { user: User }) {
               <AddWish
                 handleUpdateSelect={handleSelect}
                 selectedToUpdate={selectedWish}
+                prefill={prefillUsed ? null : initialPrefill}
+                onPrefillUsed={() => setPrefillUsed(true)}
               />
             )}
           </>
